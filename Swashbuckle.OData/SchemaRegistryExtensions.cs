@@ -10,6 +10,7 @@ using System.Web.Http.Controllers;
 using System.Web.OData;
 using System.Web.OData.Formatter;
 using Microsoft.OData.Edm;
+using Newtonsoft.Json;
 using Swashbuckle.OData.Descriptions;
 using Swashbuckle.Swagger;
 
@@ -137,18 +138,30 @@ namespace Swashbuckle.OData
                 if (edmType != null)
                 {
                     var edmProperties = new Dictionary<string, Schema>();
-                    foreach (var property in schemaDefinition.properties)
+                    foreach (var schemaDefinitionProperty in schemaDefinition.properties)
                     {
-                        var currentProperty = type.GetProperty(property.Key, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+                        var currentProperty = GetPropertyBySchemaRegistryDefinition(type, schemaDefinitionProperty);
                         var edmPropertyName = GetEdmPropertyName(currentProperty, edmType);
                         if (edmPropertyName != null)
                         {
-                            edmProperties.Add(edmPropertyName, property.Value);
+                            edmProperties.Add(edmPropertyName, schemaDefinitionProperty.Value);
                         }
                     }
                     schemaDefinition.properties = edmProperties;
                 }
             }
+        }
+
+        private static PropertyInfo GetPropertyBySchemaRegistryDefinition(Type type, KeyValuePair<string, Schema> property)
+        {
+            var propInfo = type.GetProperty(property.Key, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+
+            if (propInfo == null)
+            {
+                propInfo = type.GetProperties().SingleOrDefault(prop => prop.GetCustomAttributes<JsonPropertyAttribute>().Any(q => q.PropertyName.Equals(property.Key, StringComparison.CurrentCultureIgnoreCase)));
+            }
+
+            return propInfo;
         }
 
         private static string GetEdmPropertyName(MemberInfo currentProperty, IEdmStructuredType edmType)
@@ -166,10 +179,22 @@ namespace Swashbuckle.OData
             Contract.Requires(currentProperty != null);
             Contract.Requires(edmProperty != null);
 
-            var dataMemberAttribute = currentProperty.GetCustomAttributes<DataMemberAttribute>()?.SingleOrDefault();
+            var dataMemberAttribute = currentProperty.GetCustomAttributes<DataMemberAttribute>().SingleOrDefault();
+            var jsonPropertyAttribute = currentProperty.GetCustomAttributes<JsonPropertyAttribute>().SingleOrDefault();
 
-            return !string.IsNullOrWhiteSpace(dataMemberAttribute?.Name) ? dataMemberAttribute.Name : edmProperty.Name;
+            if (!string.IsNullOrWhiteSpace(dataMemberAttribute?.Name))
+            {
+                return dataMemberAttribute.Name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(jsonPropertyAttribute?.PropertyName))
+            {
+                return jsonPropertyAttribute.PropertyName;
+            }
+
+            return edmProperty.Name;
         }
+
 
         private static bool IsResponseWithPrimiveTypeNotSupportedByJson(Type type, MessageDirection messageDirection)
         {
